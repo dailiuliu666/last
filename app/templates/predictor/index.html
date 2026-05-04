@@ -1,0 +1,425 @@
+{% extends "base.html" %}
+
+{% block title %}股票预测{% endblock %}
+
+{% block content %}
+<section class="panel">
+    <div class="panel-head">
+        <div>
+            <h1>股票预测模块</h1>
+            <p>基于服务化后的时间序列预测接口，支持数据获取、模型训练、单点预测、未来 5 日预测和模型管理。</p>
+        </div>
+        <div class="head-actions">
+            <button class="secondary-btn" onclick="loadSavedModels()">刷新模型列表</button>
+            <a class="ghost-link" href="/docs" target="_blank" rel="noopener noreferrer">打开 API Docs</a>
+        </div>
+    </div>
+</section>
+
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+
+<section class="tool-grid">
+    <div class="tool-card">
+        <h2>1. 预测参数</h2>
+        <div class="form-row">
+            <label>股票代码</label>
+            <input id="pred-stock-code" value="688001">
+        </div>
+        <div class="form-row">
+            <label>起始年份</label>
+            <input id="pred-start-year" value="2020">
+        </div>
+        <div class="form-row">
+            <label>模型类型</label>
+            <select id="pred-model-type">
+                <option value="LSTM">LSTM</option>
+                <option value="CNN">CNN</option>
+                <option value="CNN-LSTM">CNN-LSTM</option>
+            </select>
+        </div>
+        <div class="form-row">
+            <label>目标列</label>
+            <select id="pred-target">
+                <option value="close">close</option>
+                <option value="open">open</option>
+                <option value="high">high</option>
+                <option value="low">low</option>
+            </select>
+        </div>
+        <div class="form-row">
+            <label>特征列</label>
+            <div class="checkbox-grid">
+                <label><input type="checkbox" name="pred-feature" value="open" checked> open</label>
+                <label><input type="checkbox" name="pred-feature" value="close" checked> close</label>
+                <label><input type="checkbox" name="pred-feature" value="high" checked> high</label>
+                <label><input type="checkbox" name="pred-feature" value="low" checked> low</label>
+                <label><input type="checkbox" name="pred-feature" value="volume"> volume</label>
+                <label><input type="checkbox" name="pred-feature" value="amount"> amount</label>
+            </div>
+        </div>
+    </div>
+
+    <div class="tool-card">
+        <h2>2. 训练参数</h2>
+        <div class="form-row">
+            <label>look_back</label>
+            <input id="pred-look-back" value="30">
+        </div>
+        <div class="form-row">
+            <label>dropout_rate</label>
+            <input id="pred-dropout" value="0.2">
+        </div>
+        <div class="form-row">
+            <label>learning_rate</label>
+            <input id="pred-learning-rate" value="0.001">
+        </div>
+        <div class="form-row">
+            <label>epochs</label>
+            <input id="pred-epochs" value="20">
+        </div>
+        <div class="form-row">
+            <label>batch_size</label>
+            <input id="pred-batch-size" value="32">
+        </div>
+    </div>
+
+    <div class="tool-card">
+        <h2>3. 操作</h2>
+        <p>建议顺序：先获取数据预览，再训练模型，最后做单点预测和未来 5 日预测。</p>
+        <button class="action-btn" onclick="fetchPredictorData()">获取数据预览</button>
+        <button class="secondary-btn inline-gap" onclick="trainPredictorModel()">训练模型</button>
+        <button class="secondary-btn inline-gap" onclick="predictSingle()">单点预测</button>
+        <button class="secondary-btn inline-gap" onclick="predictFuture()">未来 5 日预测</button>
+    </div>
+
+    <div class="tool-card">
+        <h2>4. 已保存模型</h2>
+        <div class="form-row">
+            <label>模型文件</label>
+            <select id="saved-model-select"></select>
+        </div>
+        <button class="action-btn" onclick="loadSelectedModel()">校验模型可加载</button>
+        <div id="saved-model-list" class="mini-note">尚未加载模型文件</div>
+    </div>
+</section>
+
+<section class="result-layout">
+    <div class="result-card">
+        <h2>执行结果</h2>
+        <pre id="predictor-log" class="result-box">等待操作...</pre>
+    </div>
+
+    <div class="result-card wide">
+        <h2>数据预览</h2>
+        <div class="table-wrap">
+            <table id="predictor-data-table">
+                <thead>
+                    <tr>
+                        <th>date</th>
+                        <th>open</th>
+                        <th>close</th>
+                        <th>high</th>
+                        <th>low</th>
+                        <th>volume</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td colspan="6">暂无数据</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</section>
+
+<section class="result-layout">
+    <div class="result-card">
+        <h2>训练效果指标</h2>
+        <div class="metric-grid">
+            <div class="metric-pill">
+                <span>MAE</span>
+                <strong id="metric-mae">-</strong>
+            </div>
+            <div class="metric-pill">
+                <span>RMSE</span>
+                <strong id="metric-rmse">-</strong>
+            </div>
+            <div class="metric-pill">
+                <span>R²</span>
+                <strong id="metric-r2">-</strong>
+            </div>
+            <div class="metric-pill">
+                <span>方向准确率</span>
+                <strong id="metric-dir-acc">-</strong>
+            </div>
+        </div>
+    </div>
+
+    <div class="result-card">
+        <h2>训练指标</h2>
+        <pre id="predictor-train-box" class="result-box">等待训练...</pre>
+    </div>
+
+    <div class="result-card">
+        <h2>单点预测</h2>
+        <pre id="predictor-single-box" class="result-box">等待预测...</pre>
+    </div>
+</section>
+
+<section class="result-layout">
+    <div class="result-card wide">
+        <h2>训练曲线可视化</h2>
+        <div id="train-history-chart" class="chart-panel"></div>
+    </div>
+</section>
+
+<section class="result-layout">
+    <div class="result-card wide">
+        <h2>测试集真实值与预测值对比</h2>
+        <div id="test-compare-chart" class="chart-panel"></div>
+    </div>
+</section>
+
+<section class="result-card compare-card">
+    <h2>未来 5 日预测</h2>
+    <div id="future-chart" class="chart-panel"></div>
+    <div class="table-wrap">
+        <table id="predictor-future-table">
+            <thead>
+                <tr>
+                    <th>日期</th>
+                    <th>预测价格</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td colspan="2">暂无结果</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+</section>
+
+<script>
+let savedModels = [];
+let trainHistoryChart = null;
+let testCompareChart = null;
+let futureChart = null;
+
+function predictorLog(data) {
+    document.getElementById('predictor-log').textContent = JSON.stringify(data, null, 2);
+}
+
+async function predictorCall(url, options = {}) {
+    const response = await fetch(url, options);
+    return await response.json();
+}
+
+function getSelectedFeatures() {
+    return Array.from(document.querySelectorAll('input[name="pred-feature"]:checked')).map(item => item.value);
+}
+
+function getBasePayload() {
+    return {
+        stock_code: document.getElementById('pred-stock-code').value.trim(),
+        start_year: parseInt(document.getElementById('pred-start-year').value.trim(), 10),
+        selected_features: getSelectedFeatures(),
+        selected_target: document.getElementById('pred-target').value,
+        model_type: document.getElementById('pred-model-type').value,
+        look_back: parseInt(document.getElementById('pred-look-back').value.trim(), 10),
+        dropout_rate: parseFloat(document.getElementById('pred-dropout').value.trim()),
+        learning_rate: parseFloat(document.getElementById('pred-learning-rate').value.trim()),
+        epochs: parseInt(document.getElementById('pred-epochs').value.trim(), 10),
+        batch_size: parseInt(document.getElementById('pred-batch-size').value.trim(), 10)
+    };
+}
+
+async function fetchPredictorData() {
+    const payload = {
+        stock_code: document.getElementById('pred-stock-code').value.trim(),
+        start_year: parseInt(document.getElementById('pred-start-year').value.trim(), 10)
+    };
+    const data = await predictorCall('/api/predictor/fetch-data', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+    });
+    predictorLog(data);
+    renderPredictorData(data.preview || []);
+}
+
+async function trainPredictorModel() {
+    const payload = getBasePayload();
+    const data = await predictorCall('/api/predictor/train', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+    });
+    predictorLog(data);
+    document.getElementById('predictor-train-box').textContent = JSON.stringify(data.metrics || data, null, 2);
+    renderTrainMetrics(data.metrics || {});
+    renderTrainHistory(data.history || {});
+    renderTestCompare(data.test_dates || [], data.metrics?.actuals || [], data.metrics?.predictions || []);
+    await loadSavedModels();
+}
+
+async function predictSingle() {
+    const payload = getBasePayload();
+    const data = await predictorCall('/api/predictor/predict-one', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+    });
+    predictorLog(data);
+    document.getElementById('predictor-single-box').textContent = JSON.stringify(data.result || data, null, 2);
+}
+
+async function predictFuture() {
+    const selectedPath = document.getElementById('saved-model-select').value;
+    if (!selectedPath) {
+        predictorLog({ success: false, message: '请先训练或选择一个已保存模型' });
+        return;
+    }
+    const payload = {
+        model_path: selectedPath,
+        stock_code: document.getElementById('pred-stock-code').value.trim(),
+        start_year: parseInt(document.getElementById('pred-start-year').value.trim(), 10),
+        selected_features: getSelectedFeatures(),
+        selected_target: document.getElementById('pred-target').value,
+        look_back: parseInt(document.getElementById('pred-look-back').value.trim(), 10),
+        days_to_predict: 5
+    };
+    const data = await predictorCall('/api/predictor/predict-future', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+    });
+    predictorLog(data);
+    const futureRows = data.predictions || [];
+    renderFutureTable(futureRows);
+    renderFutureChart(futureRows);
+}
+
+async function loadSavedModels() {
+    const data = await predictorCall('/api/predictor/models');
+    predictorLog(data);
+    savedModels = data.models || [];
+    const select = document.getElementById('saved-model-select');
+    select.innerHTML = savedModels.length
+        ? savedModels.map(item => `<option value="${item.path}">${item.name}</option>`).join('')
+        : '<option value="">暂无模型</option>';
+    document.getElementById('saved-model-list').textContent = savedModels.length
+        ? savedModels.map(item => item.path).join('\n')
+        : '尚未加载模型文件';
+}
+
+async function loadSelectedModel() {
+    const selectedPath = document.getElementById('saved-model-select').value;
+    if (!selectedPath) {
+        predictorLog({ success: false, message: '没有可加载的模型文件' });
+        return;
+    }
+    const data = await predictorCall('/api/predictor/load-model', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model_path: selectedPath })
+    });
+    predictorLog(data);
+}
+
+function renderPredictorData(rows) {
+    const tbody = document.querySelector('#predictor-data-table tbody');
+    if (!rows.length) {
+        tbody.innerHTML = '<tr><td colspan="6">暂无数据</td></tr>';
+        return;
+    }
+    tbody.innerHTML = rows.map(item => `
+        <tr>
+            <td>${(item.date || '').slice(0, 10)}</td>
+            <td>${item.open ?? ''}</td>
+            <td>${item.close ?? ''}</td>
+            <td>${item.high ?? ''}</td>
+            <td>${item.low ?? ''}</td>
+            <td>${item.volume ?? ''}</td>
+        </tr>
+    `).join('');
+}
+
+function renderFutureTable(rows) {
+    const tbody = document.querySelector('#predictor-future-table tbody');
+    if (!rows.length) {
+        tbody.innerHTML = '<tr><td colspan="2">暂无结果</td></tr>';
+        return;
+    }
+    tbody.innerHTML = rows.map(item => `
+        <tr>
+            <td>${item.date}</td>
+            <td>${item.predicted_price.toFixed(4)}</td>
+        </tr>
+    `).join('');
+}
+
+function renderTrainMetrics(metrics) {
+    document.getElementById('metric-mae').textContent = metrics.mae != null ? metrics.mae.toFixed(4) : '-';
+    document.getElementById('metric-rmse').textContent = metrics.rmse != null ? metrics.rmse.toFixed(4) : '-';
+    document.getElementById('metric-r2').textContent = metrics.r2 != null ? metrics.r2.toFixed(4) : '-';
+    document.getElementById('metric-dir-acc').textContent = metrics.directional_accuracy != null
+        ? `${(metrics.directional_accuracy * 100).toFixed(2)}%`
+        : '-';
+}
+
+function renderTrainHistory(history) {
+    const container = document.getElementById('train-history-chart');
+    trainHistoryChart = trainHistoryChart || echarts.init(container);
+    const loss = history.loss || [];
+    const valLoss = history.val_loss || [];
+    const epochs = loss.map((_, index) => index + 1);
+    trainHistoryChart.setOption({
+        tooltip: { trigger: 'axis' },
+        legend: { data: ['训练集 Loss', '验证集 Loss'] },
+        xAxis: { type: 'category', data: epochs, name: 'Epoch' },
+        yAxis: { type: 'value', name: 'Loss' },
+        series: [
+            { name: '训练集 Loss', type: 'line', smooth: true, data: loss },
+            { name: '验证集 Loss', type: 'line', smooth: true, data: valLoss }
+        ]
+    });
+}
+
+function renderTestCompare(dates, actuals, predictions) {
+    const container = document.getElementById('test-compare-chart');
+    testCompareChart = testCompareChart || echarts.init(container);
+    testCompareChart.setOption({
+        tooltip: { trigger: 'axis' },
+        legend: { data: ['真实值', '预测值'] },
+        xAxis: { type: 'category', data: dates, name: '日期' },
+        yAxis: { type: 'value', name: '价格' },
+        series: [
+            { name: '真实值', type: 'line', smooth: true, data: actuals },
+            { name: '预测值', type: 'line', smooth: true, data: predictions }
+        ]
+    });
+}
+
+function renderFutureChart(rows) {
+    const container = document.getElementById('future-chart');
+    futureChart = futureChart || echarts.init(container);
+    futureChart.setOption({
+        tooltip: { trigger: 'axis' },
+        xAxis: { type: 'category', data: rows.map(item => item.date), name: '日期' },
+        yAxis: { type: 'value', name: '预测价格' },
+        series: [
+            {
+                type: 'line',
+                smooth: true,
+                symbol: 'circle',
+                data: rows.map(item => item.predicted_price)
+            }
+        ]
+    });
+}
+
+loadSavedModels();
+</script>
+{% endblock %}

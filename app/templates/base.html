@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Graduation Finance Platform{% endblock %}</title>
+    <link rel="stylesheet" href="/static/css/app.css">
+</head>
+<body>
+    <header class="site-header">
+        <nav class="nav">
+            <a href="/">首页</a>
+            <a href="/quant">量化模块</a>
+            <a href="/predictor">股票预测</a>
+            <a href="/assistant">AI 助手</a>
+        </nav>
+    </header>
+    <main class="page">
+        {% block content %}{% endblock %}
+    </main>
+</body>
+</html>

@@ -1,0 +1,572 @@
+{% extends "base.html" %}
+
+{% block title %}量化模块{% endblock %}
+
+{% block content %}
+<section class="panel">
+    <div class="panel-head">
+        <div>
+            <h1>量化模块</h1>
+            <p>用于同步科创板数据、计算因子、生成评分、训练 ML 模型并输出预测结果。</p>
+        </div>
+        <div class="head-actions">
+            <button class="secondary-btn" onclick="loadOverview()">刷新概览</button>
+            <a class="ghost-link" href="/docs" target="_blank" rel="noopener noreferrer">打开 API Docs</a>
+        </div>
+    </div>
+</section>
+
+<section class="stat-grid">
+    <div class="stat-card">
+        <span class="stat-label">股票池数量</span>
+        <strong id="overview-stock-basic">-</strong>
+    </div>
+    <div class="stat-card">
+        <span class="stat-label">因子值总数</span>
+        <strong id="overview-factor-values">-</strong>
+    </div>
+    <div class="stat-card">
+        <span class="stat-label">最新因子日期</span>
+        <strong id="overview-latest-factor-date">-</strong>
+    </div>
+</section>
+
+<section class="tool-grid">
+    <div class="tool-card">
+        <h2>1. 基础资料同步</h2>
+        <p>先把科创板股票基础资料写入数据库。</p>
+        <button class="action-btn" onclick="syncBasic()">同步 stock_basic</button>
+    </div>
+
+    <div class="tool-card">
+        <h2>2. 日线同步</h2>
+        <p>基于已同步股票池获取日线数据。</p>
+        <div class="form-row">
+            <label>开始日期</label>
+            <input id="daily-start" value="20240101">
+        </div>
+        <div class="form-row">
+            <label>结束日期</label>
+            <input id="daily-end" value="20241231">
+        </div>
+        <div class="form-row">
+            <label>股票数量</label>
+            <input id="daily-limit" value="20">
+        </div>
+        <button class="action-btn" onclick="syncDaily()">同步 stock_daily</button>
+    </div>
+
+    <div class="tool-card">
+        <h2>3. 因子初始化</h2>
+        <p>初始化或更新内置因子定义，包含动量、波动率、成交额、成交量比和价格位置。</p>
+        <button class="action-btn" onclick="bootstrapFactors()">初始化因子</button>
+    </div>
+
+    <div class="tool-card">
+        <h2>4. 自定义因子</h2>
+        <p>保存一个可计算的自定义公式，公式字段支持 open/high/low/close/vol/amount。</p>
+        <div class="form-row">
+            <label>因子 ID</label>
+            <input id="custom-factor-id" value="custom_momentum_10d">
+        </div>
+        <div class="form-row">
+            <label>因子名称</label>
+            <input id="custom-factor-name" value="10日自定义动量">
+        </div>
+        <div class="form-row">
+            <label>因子类型</label>
+            <input id="custom-factor-type" value="custom">
+        </div>
+        <div class="form-row">
+            <label>公式</label>
+            <input id="custom-factor-formula" value="close.pct_change(10)">
+        </div>
+        <div class="form-row">
+            <label>方向</label>
+            <select id="custom-factor-direction">
+                <option value="1">越高越好</option>
+                <option value="-1">越低越好</option>
+            </select>
+        </div>
+        <div class="form-row">
+            <label>权重</label>
+            <input id="custom-factor-weight" value="1.0">
+        </div>
+        <button class="action-btn" onclick="createCustomFactor()">保存自定义因子</button>
+    </div>
+
+    <div class="tool-card">
+        <h2>5. 因子计算</h2>
+        <p>按交易日计算所有启用因子并落库，包括内置因子和自定义因子。</p>
+        <div class="form-row">
+            <label>交易日</label>
+            <input id="factor-date" value="20241227">
+        </div>
+        <div class="form-row">
+            <label>股票数量</label>
+            <input id="factor-limit" value="20">
+        </div>
+        <button class="action-btn" onclick="calculateFactors()">计算因子</button>
+        <button class="secondary-btn inline-gap" onclick="calculateFactorRange()">批量计算区间因子</button>
+    </div>
+
+    <div class="tool-card">
+        <h2>6. 基础评分</h2>
+        <p>基于因子 z_score、方向和权重计算综合分并输出排名。</p>
+        <div class="form-row">
+            <label>交易日</label>
+            <input id="score-date" value="20241227">
+        </div>
+        <button class="action-btn" onclick="scoreStocks()">生成评分</button>
+    </div>
+
+    <div class="tool-card">
+        <h2>7. 创建模型</h2>
+        <div class="form-row">
+            <label>模型 ID</label>
+            <input id="model-id" value="star_rf_v1">
+        </div>
+        <div class="form-row">
+            <label>模型名称</label>
+            <input id="model-name" value="STAR Random Forest V1">
+        </div>
+        <div class="form-row">
+            <label>模型类型</label>
+            <select id="model-type">
+                <option value="random_forest">random_forest</option>
+                <option value="xgboost">xgboost</option>
+                <option value="lightgbm">lightgbm</option>
+            </select>
+        </div>
+        <div class="form-row">
+            <label>目标类型</label>
+            <select id="target-type">
+                <option value="return_5d">return_5d</option>
+                <option value="return_20d">return_20d</option>
+            </select>
+        </div>
+        <button class="action-btn" onclick="createModel()">创建模型定义</button>
+    </div>
+
+    <div class="tool-card">
+        <h2>8. 训练模型</h2>
+        <div class="form-row">
+            <label>训练开始</label>
+            <input id="train-start" value="20240101">
+        </div>
+        <div class="form-row">
+            <label>训练结束</label>
+            <input id="train-end" value="20241227">
+        </div>
+        <button class="action-btn" onclick="trainModel()">训练 ML 模型</button>
+    </div>
+
+    <div class="tool-card">
+        <h2>9. ML 预测</h2>
+        <div class="form-row">
+            <label>预测交易日</label>
+            <input id="predict-date" value="20241227">
+        </div>
+        <button class="action-btn" onclick="predictModel()">生成 ML 预测</button>
+    </div>
+
+    <div class="tool-card">
+        <h2>10. 个股分析</h2>
+        <div class="form-row">
+            <label>股票代码</label>
+            <input id="stock-analysis-code" placeholder="例如 688001.SH">
+        </div>
+        <div class="form-row">
+            <label>交易日</label>
+            <input id="stock-analysis-date" value="20241227">
+        </div>
+        <button class="action-btn" onclick="analyzeStock()">查看个股因子</button>
+        <button class="secondary-btn inline-gap" onclick="analyzeStockPrediction()">查看个股 ML 预测</button>
+    </div>
+</section>
+
+<section class="result-layout">
+    <div class="result-card">
+        <h2>执行结果</h2>
+        <pre id="quant-log" class="result-box">等待操作...</pre>
+    </div>
+
+    <div class="result-card wide">
+        <div class="table-head">
+            <h2>基础评分结果</h2>
+            <div class="head-actions">
+                <button class="secondary-btn" onclick="loadFactors()">查看因子定义</button>
+                <button class="secondary-btn" onclick="compareTopResults()">对比基础评分与 ML 结果</button>
+            </div>
+        </div>
+        <div id="factor-list" class="mini-note">尚未加载因子定义</div>
+        <div class="mini-note">勾选的因子会用于“生成评分”和“创建模型定义”；不勾选时默认使用全部因子。</div>
+        <div id="factor-selector" class="checkbox-grid mini-note">尚未加载可选因子</div>
+        <div class="table-wrap">
+            <table id="score-table">
+                <thead>
+                    <tr>
+                        <th>排名</th>
+                        <th>股票代码</th>
+                        <th>名称</th>
+                        <th>行业</th>
+                        <th>综合分</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td colspan="5">暂无结果</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</section>
+
+<section class="result-layout">
+    <div class="result-card">
+        <div class="table-head">
+            <h2>模型定义</h2>
+            <button class="secondary-btn" onclick="loadModels()">刷新模型列表</button>
+        </div>
+        <div id="model-list" class="mini-note">尚未加载模型定义</div>
+    </div>
+
+    <div class="result-card wide">
+        <h2>ML 预测结果</h2>
+        <div class="table-wrap">
+            <table id="ml-table">
+                <thead>
+                    <tr>
+                        <th>排名</th>
+                        <th>股票代码</th>
+                        <th>预测值</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td colspan="3">暂无结果</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</section>
+
+<section class="result-layout">
+    <div class="result-card">
+        <h2>个股因子快照</h2>
+        <pre id="stock-factor-box" class="result-box">等待查询...</pre>
+    </div>
+
+    <div class="result-card">
+        <h2>个股 ML 预测</h2>
+        <pre id="stock-ml-box" class="result-box">等待查询...</pre>
+    </div>
+</section>
+
+<section class="result-card compare-card">
+    <h2>基础评分与 ML 预测对比</h2>
+    <div class="table-wrap">
+        <table id="compare-table">
+            <thead>
+                <tr>
+                    <th>股票代码</th>
+                    <th>基础评分排名</th>
+                    <th>ML 排名</th>
+                    <th>是否同时入选</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td colspan="4">暂无对比结果</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+</section>
+
+<script>
+let latestScoreRows = [];
+let latestMlRows = [];
+let loadedFactorIds = [];
+
+async function callJson(url, options = {}) {
+    const response = await fetch(url, options);
+    const data = await response.json();
+    return data;
+}
+
+function writeLog(data) {
+    document.getElementById('quant-log').textContent = JSON.stringify(data, null, 2);
+}
+
+async function loadOverview() {
+    const data = await callJson('/api/quant/overview');
+    if (!data.success) {
+        writeLog(data);
+        return;
+    }
+    document.getElementById('overview-stock-basic').textContent = data.overview.stock_basic_count ?? '-';
+    document.getElementById('overview-factor-values').textContent = data.overview.factor_value_count ?? '-';
+    document.getElementById('overview-latest-factor-date').textContent = data.overview.latest_factor_trade_date ?? '-';
+}
+
+async function syncBasic() {
+    const data = await callJson('/api/quant/sync/star-board/basic', { method: 'POST' });
+    writeLog(data);
+    await loadOverview();
+}
+
+async function syncDaily() {
+    const start = document.getElementById('daily-start').value.trim();
+    const end = document.getElementById('daily-end').value.trim();
+    const limit = document.getElementById('daily-limit').value.trim();
+    const data = await callJson(`/api/quant/sync/star-board/daily?start_date=${start}&end_date=${end}&limit=${limit}`, {
+        method: 'POST'
+    });
+    writeLog(data);
+}
+
+async function bootstrapFactors() {
+    const data = await callJson('/api/quant/factors/bootstrap', { method: 'POST' });
+    writeLog(data);
+    await loadFactors();
+}
+
+async function createCustomFactor() {
+    const payload = {
+        factor_id: document.getElementById('custom-factor-id').value.trim(),
+        factor_name: document.getElementById('custom-factor-name').value.trim(),
+        factor_type: document.getElementById('custom-factor-type').value.trim(),
+        formula: document.getElementById('custom-factor-formula').value.trim(),
+        direction: Number(document.getElementById('custom-factor-direction').value),
+        weight: Number(document.getElementById('custom-factor-weight').value)
+    };
+    const data = await callJson('/api/quant/factors/custom', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+    });
+    writeLog(data);
+    await loadFactors();
+}
+
+async function calculateFactors() {
+    const tradeDate = document.getElementById('factor-date').value.trim();
+    const limit = document.getElementById('factor-limit').value.trim();
+    const data = await callJson(`/api/quant/factors/calculate?trade_date=${tradeDate}&limit=${limit}`, {
+        method: 'POST'
+    });
+    writeLog(data);
+    await loadOverview();
+}
+
+async function calculateFactorRange() {
+    const start = document.getElementById('train-start').value.trim();
+    const end = document.getElementById('train-end').value.trim();
+    const limit = document.getElementById('factor-limit').value.trim();
+    const data = await callJson(`/api/quant/factors/calculate-range?start_date=${start}&end_date=${end}&limit=${limit}`, {
+        method: 'POST'
+    });
+    writeLog(data);
+    await loadOverview();
+}
+
+async function scoreStocks() {
+    const tradeDate = document.getElementById('score-date').value.trim();
+    const factorIds = getSelectedFactorIds();
+    const data = await callJson('/api/quant/scores', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ trade_date: tradeDate, factor_ids: factorIds })
+    });
+    writeLog(data);
+    latestScoreRows = data.success ? (data.results || []) : [];
+    renderScoreTable(latestScoreRows);
+}
+
+async function createModel() {
+    let factorIds = getSelectedFactorIds();
+    if (!factorIds.length) {
+        factorIds = loadedFactorIds;
+    }
+    const payload = {
+        model_id: document.getElementById('model-id').value.trim(),
+        model_name: document.getElementById('model-name').value.trim(),
+        model_type: document.getElementById('model-type').value,
+        target_type: document.getElementById('target-type').value,
+        factor_list: factorIds
+    };
+    const data = await callJson('/api/quant/models', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+    });
+    writeLog(data);
+    await loadModels();
+}
+
+async function trainModel() {
+    const payload = {
+        model_id: document.getElementById('model-id').value.trim(),
+        start_date: document.getElementById('train-start').value.trim(),
+        end_date: document.getElementById('train-end').value.trim()
+    };
+    const data = await callJson('/api/quant/models/train', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+    });
+    writeLog(data);
+    await loadModels();
+}
+
+async function predictModel() {
+    const payload = {
+        model_id: document.getElementById('model-id').value.trim(),
+        trade_date: document.getElementById('predict-date').value.trim()
+    };
+    const data = await callJson('/api/quant/models/predict', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+    });
+    writeLog(data);
+    latestMlRows = data.success ? (data.results || []) : [];
+    renderMlTable(latestMlRows);
+}
+
+async function loadFactors() {
+    const data = await callJson('/api/quant/factors');
+    if (!data.success) {
+        document.getElementById('factor-list').textContent = '加载失败';
+        return;
+    }
+    const names = (data.factors || []).map(item => {
+        const directionText = Number(item.direction) === -1 ? '越低越好' : '越高越好';
+        return `${item.factor_id} | ${item.factor_name} | ${item.factor_type} | ${directionText} | weight=${item.weight} | ${item.formula}`;
+    });
+    document.getElementById('factor-list').textContent = names.length ? names.join(' | ') : '暂无因子定义';
+    renderFactorSelector(data.factors || []);
+}
+
+function renderFactorSelector(factors) {
+    loadedFactorIds = factors.map(item => item.factor_id);
+    const box = document.getElementById('factor-selector');
+    if (!factors.length) {
+        box.textContent = '暂无可选因子，请先初始化因子';
+        return;
+    }
+    box.innerHTML = factors.map(item => {
+        const directionText = Number(item.direction) === -1 ? '低优' : '高优';
+        return `
+            <label class="checkbox-item">
+                <input type="checkbox" class="factor-check" value="${item.factor_id}" checked>
+                <span>${item.factor_id} (${directionText}, w=${item.weight})</span>
+            </label>
+        `;
+    }).join('');
+}
+
+function getSelectedFactorIds() {
+    return Array.from(document.querySelectorAll('.factor-check:checked')).map(item => item.value);
+}
+
+async function loadModels() {
+    const data = await callJson('/api/quant/models');
+    if (!data.success) {
+        document.getElementById('model-list').textContent = '加载失败';
+        return;
+    }
+    const lines = (data.models || []).map(item =>
+        `${item.model_id} | ${item.model_type} | ${item.target_type} | artifact=${item.artifact_path || '未训练'}`
+    );
+    document.getElementById('model-list').textContent = lines.length ? lines.join('\n') : '暂无模型定义';
+}
+
+async function analyzeStock() {
+    const tsCode = document.getElementById('stock-analysis-code').value.trim();
+    const tradeDate = document.getElementById('stock-analysis-date').value.trim();
+    if (!tsCode) {
+        document.getElementById('stock-factor-box').textContent = '请先输入股票代码';
+        return;
+    }
+    const data = await callJson(`/api/quant/stocks/${tsCode}/factors?trade_date=${tradeDate}`);
+    document.getElementById('stock-factor-box').textContent = JSON.stringify(data, null, 2);
+}
+
+async function analyzeStockPrediction() {
+    const tsCode = document.getElementById('stock-analysis-code').value.trim();
+    const tradeDate = document.getElementById('stock-analysis-date').value.trim();
+    const modelId = document.getElementById('model-id').value.trim();
+    if (!tsCode) {
+        document.getElementById('stock-ml-box').textContent = '请先输入股票代码';
+        return;
+    }
+    const data = await callJson(`/api/quant/models/${modelId}/stocks/${tsCode}/prediction?trade_date=${tradeDate}`);
+    document.getElementById('stock-ml-box').textContent = JSON.stringify(data, null, 2);
+}
+
+function compareTopResults() {
+    const tbody = document.querySelector('#compare-table tbody');
+    if (!latestScoreRows.length || !latestMlRows.length) {
+        tbody.innerHTML = '<tr><td colspan="4">请先生成基础评分和 ML 预测结果</td></tr>';
+        return;
+    }
+    const scoreMap = new Map(latestScoreRows.map(item => [item.ts_code, item.rank]));
+    const mlMap = new Map(latestMlRows.map(item => [item.ts_code, item.rank]));
+    const codes = Array.from(new Set([...scoreMap.keys(), ...mlMap.keys()]));
+
+    tbody.innerHTML = codes.map(code => {
+        const scoreRank = scoreMap.get(code) ?? '-';
+        const mlRank = mlMap.get(code) ?? '-';
+        const overlap = scoreMap.has(code) && mlMap.has(code) ? '是' : '否';
+        return `
+            <tr>
+                <td>${code}</td>
+                <td>${scoreRank}</td>
+                <td>${mlRank}</td>
+                <td>${overlap}</td>
+            </tr>
+        `;
+    }).join('');
+}
+
+function renderScoreTable(rows) {
+    const tbody = document.querySelector('#score-table tbody');
+    if (!rows.length) {
+        tbody.innerHTML = '<tr><td colspan="5">暂无结果</td></tr>';
+        return;
+    }
+    tbody.innerHTML = rows.map(item => `
+        <tr>
+            <td>${item.rank}</td>
+            <td>${item.ts_code}</td>
+            <td>${item.name || ''}</td>
+            <td>${item.industry || ''}</td>
+            <td>${item.composite_score.toFixed(4)}</td>
+        </tr>
+    `).join('');
+}
+
+function renderMlTable(rows) {
+    const tbody = document.querySelector('#ml-table tbody');
+    if (!rows.length) {
+        tbody.innerHTML = '<tr><td colspan="3">暂无结果</td></tr>';
+        return;
+    }
+    tbody.innerHTML = rows.map(item => `
+        <tr>
+            <td>${item.rank}</td>
+            <td>${item.ts_code}</td>
+            <td>${item.predicted_value.toFixed(6)}</td>
+        </tr>
+    `).join('');
+}
+
+loadOverview();
+loadFactors();
+loadModels();
+</script>
+{% endblock %}
