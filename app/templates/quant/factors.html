@@ -1,0 +1,166 @@
+{% extends "base.html" %}
+
+{% block title %}因子管理{% endblock %}
+
+{% block content %}
+<section class="page-title">
+    <div>
+        <h1>因子管理</h1>
+        <p>管理技术面、量价类和自定义因子，点击按钮选择参与评分和建模的因子。</p>
+    </div>
+    <div class="head-actions">
+        <button class="success-btn" onclick="bootstrapFactors()">初始化因子</button>
+        <button class="action-btn" onclick="toggleCustomPanel()">创建自定义因子</button>
+    </div>
+</section>
+
+<section class="stat-grid">
+    <div class="stat-card"><strong id="factor-total">0</strong><span>总因子数</span></div>
+    <div class="stat-card"><strong id="factor-builtin">0</strong><span>内置因子</span></div>
+    <div class="stat-card"><strong id="factor-custom">0</strong><span>自定义因子</span></div>
+    <div class="stat-card"><strong id="factor-active">0</strong><span>活跃因子</span></div>
+</section>
+
+<section class="panel" id="custom-panel" style="display:none">
+    <div class="form-grid">
+        <div class="form-row"><label>因子 ID</label><input id="custom-factor-id" value="custom_momentum_10d"></div>
+        <div class="form-row"><label>因子名称</label><input id="custom-factor-name" value="10日自定义动量"></div>
+        <div class="form-row"><label>因子类型</label><input id="custom-factor-type" value="custom"></div>
+        <div class="form-row"><label>方向</label><select id="custom-factor-direction"><option value="1">越高越好</option><option value="-1">越低越好</option></select></div>
+    </div>
+    <div class="form-row" style="margin-top:12px"><label>公式</label><input id="custom-factor-formula" value="close.pct_change(10)"></div>
+    <div class="button-row" style="margin-top:12px"><button class="action-btn" onclick="createCustomFactor()">保存自定义因子</button></div>
+</section>
+
+<section class="panel">
+    <div class="form-grid">
+        <div class="form-row"><label>因子类型</label><select id="factor-type-filter"><option value="">全部类型</option></select></div>
+        <div class="form-row"><label>来源</label><select id="factor-source-filter"><option value="">全部来源</option><option value="builtin">内置</option><option value="custom">自定义</option></select></div>
+        <div class="form-row"><label>状态</label><select id="factor-status-filter"><option value="">全部状态</option><option value="active">活跃</option><option value="inactive">停用</option></select></div>
+        <div class="form-row"><label>搜索</label><input id="factor-keyword" placeholder="搜索因子名称或 ID"></div>
+    </div>
+</section>
+
+<section class="panel">
+    <div class="table-head" style="padding:0 0 12px;border-bottom:none">
+        <h2>因子选择</h2>
+        <div class="head-actions">
+            <button class="secondary-btn" onclick="selectAllFactors()">全选</button>
+            <button class="secondary-btn" onclick="clearFactors()">清空</button>
+        </div>
+    </div>
+    <div id="factor-selector" class="selector-grid"></div>
+</section>
+
+<section class="table-card">
+    <div class="table-head">
+        <h2>因子列表</h2>
+        <span class="badge blue" id="factor-visible-count">0</span>
+    </div>
+    <div class="table-wrap">
+        <table>
+            <thead><tr><th>因子 ID</th><th>因子名称</th><th>类型</th><th>来源</th><th>状态</th><th>描述</th><th>操作</th></tr></thead>
+            <tbody id="factor-table-body"></tbody>
+        </table>
+    </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/quant-common.js"></script>
+<script>
+let factorRows = [];
+let selectedFactors = new Set();
+
+function toggleCustomPanel() {
+    const panel = document.getElementById('custom-panel');
+    panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+}
+
+async function bootstrapFactors() {
+    await qcall('/api/quant/factors/bootstrap', { method: 'POST' });
+    await loadFactorsPage();
+}
+
+async function createCustomFactor() {
+    const payload = {
+        factor_id: val('custom-factor-id'),
+        factor_name: val('custom-factor-name'),
+        factor_type: val('custom-factor-type'),
+        formula: val('custom-factor-formula'),
+        direction: Number(val('custom-factor-direction')),
+        weight: 1
+    };
+    await qcall('/api/quant/factors/custom', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+    await loadFactorsPage();
+}
+
+async function loadFactorsPage() {
+    const data = await qjson('/api/quant/factors');
+    factorRows = data.factors || [];
+    selectedFactors = new Set(factorRows.map(item => item.factor_id));
+    renderFactorStats();
+    renderFactorFilters();
+    renderFactors();
+}
+
+function renderFactorStats() {
+    document.getElementById('factor-total').textContent = factorRows.length;
+    document.getElementById('factor-builtin').textContent = factorRows.filter(item => item.is_builtin).length;
+    document.getElementById('factor-custom').textContent = factorRows.filter(item => !item.is_builtin).length;
+    document.getElementById('factor-active').textContent = factorRows.filter(item => item.is_active).length;
+}
+
+function renderFactorFilters() {
+    const types = Array.from(new Set(factorRows.map(item => item.factor_type).filter(Boolean)));
+    const select = document.getElementById('factor-type-filter');
+    const current = select.value;
+    select.innerHTML = '<option value="">全部类型</option>' + types.map(type => `<option value="${type}">${type}</option>`).join('');
+    select.value = current;
+}
+
+function filteredFactors() {
+    const type = val('factor-type-filter');
+    const source = val('factor-source-filter');
+    const status = val('factor-status-filter');
+    const keyword = val('factor-keyword').toLowerCase();
+    return factorRows.filter(item => {
+        if (type && item.factor_type !== type) return false;
+        if (source === 'builtin' && !item.is_builtin) return false;
+        if (source === 'custom' && item.is_builtin) return false;
+        if (status === 'active' && !item.is_active) return false;
+        if (status === 'inactive' && item.is_active) return false;
+        if (keyword && !(`${item.factor_id} ${item.factor_name}`.toLowerCase().includes(keyword))) return false;
+        return true;
+    });
+}
+
+function renderFactors() {
+    const rows = filteredFactors();
+    document.getElementById('factor-visible-count').textContent = rows.length;
+    document.getElementById('factor-selector').innerHTML = rows.map(item => `
+        <button class="select-pill ${selectedFactors.has(item.factor_id) ? 'active' : ''}" onclick="toggleFactor('${item.factor_id}')">${item.factor_name || item.factor_id}</button>
+    `).join('');
+    document.getElementById('factor-table-body').innerHTML = rows.map(item => `
+        <tr>
+            <td class="code-text">${item.factor_id}</td>
+            <td>${item.factor_name}</td>
+            <td><span class="badge ${factorBadge(item.factor_type)}">${item.factor_type}</span></td>
+            <td><span class="badge blue">${item.is_builtin ? '内置' : '自定义'}</span></td>
+            <td><span class="badge green">${item.is_active ? '活跃' : '停用'}</span></td>
+            <td>${item.description || item.formula || '-'}</td>
+            <td><button class="secondary-btn" onclick="toggleFactor('${item.factor_id}')">${selectedFactors.has(item.factor_id) ? '取消' : '选择'}</button></td>
+        </tr>
+    `).join('');
+}
+
+function toggleFactor(id) {
+    selectedFactors.has(id) ? selectedFactors.delete(id) : selectedFactors.add(id);
+    renderFactors();
+}
+function selectAllFactors() { selectedFactors = new Set(factorRows.map(item => item.factor_id)); renderFactors(); }
+function clearFactors() { selectedFactors.clear(); renderFactors(); }
+['factor-type-filter','factor-source-filter','factor-status-filter','factor-keyword'].forEach(id => document.addEventListener('input', event => { if (event.target.id === id) renderFactors(); }));
+loadFactorsPage();
+</script>
+{% endblock %}

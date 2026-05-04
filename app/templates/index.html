@@ -1,15 +1,136 @@
 {% extends "base.html" %}
 
-{% block title %}首页{% endblock %}
+{% block title %}首页 - 股票分析系统{% endblock %}
+
+{% block head %}
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+{% endblock %}
 
 {% block content %}
-<section class="hero">
-    <h1>毕业设计金融平台</h1>
-    <p>统一聚合量化选股、股票预测和 AI 财经助手。</p>
-    <div class="grid">
-        <a class="card-link" href="/quant">量化模块</a>
-        <a class="card-link" href="/predictor">股票预测</a>
-        <a class="card-link" href="/assistant">AI 助手</a>
+<section class="hero-banner">
+    <h1>股票分析系统</h1>
+    <p>集成量化因子、模型训练、股票预测和 AI 财经问答的毕业设计金融平台</p>
+    <p>支持股票池管理、因子筛选、评分排序、模型预测和研究辅助分析</p>
+    <div class="hero-actions">
+        <a class="action-btn" href="/quant">开始分析</a>
+        <a class="secondary-btn" href="/quant/scoring">选股筛选</a>
     </div>
 </section>
+
+<h2 class="section-title">核心功能</h2>
+<section class="feature-grid">
+    <a class="feature-card" href="/stocks">
+        <div class="feature-icon">☷</div>
+        <h3>股票列表</h3>
+        <p>浏览股票池信息，支持按行业、地区和关键词筛选。</p>
+        <span class="action-btn">查看股票</span>
+    </a>
+    <a class="feature-card" href="/quant/factors">
+        <div class="feature-icon">⚙</div>
+        <h3>因子管理</h3>
+        <p>管理内置因子和自定义因子，选择参与评分和建模的特征。</p>
+        <span class="success-btn">因子管理</span>
+    </a>
+    <a class="feature-card" href="/quant/scoring">
+        <div class="feature-icon">★</div>
+        <h3>选股评分</h3>
+        <p>基于多因子权重计算综合得分，生成股票排名和可视化结果。</p>
+        <span class="action-btn">开始评分</span>
+    </a>
+    <a class="feature-card" href="/assistant">
+        <div class="feature-icon">AI</div>
+        <h3>AI 财经助手</h3>
+        <p>用自然语言查询行情、财务、新闻、研报和多股对比。</p>
+        <span class="secondary-btn">智能查询</span>
+    </a>
+</section>
+
+<h2 class="section-title">多因子模型系统</h2>
+<section class="module-grid">
+    <a class="feature-card" href="/quant/models">
+        <div class="feature-icon">🧠</div>
+        <h3>模型管理</h3>
+        <p>创建和维护随机森林、XGBoost、LightGBM 等多因子模型。</p>
+        <span class="success-btn">模型管理</span>
+    </a>
+    <a class="feature-card" href="/predictor">
+        <div class="feature-icon">📈</div>
+        <h3>股票预测</h3>
+        <p>训练时间序列模型，查看训练曲线、预测对比和未来走势。</p>
+        <span class="action-btn">股票预测</span>
+    </a>
+    <a class="feature-card" href="/quant/workbench">
+        <div class="feature-icon">⌘</div>
+        <h3>量化工作台</h3>
+        <p>保留完整操作台，适合批量同步、计算、训练和调试。</p>
+        <span class="secondary-btn">进入工作台</span>
+    </a>
+</section>
+
+<h2 class="section-title">数据概览</h2>
+<section class="stat-grid">
+    <div class="stat-card"><strong id="home-stock-count">-</strong><span>股票池数量</span></div>
+    <div class="stat-card"><strong id="home-factor-count">-</strong><span>因子定义</span></div>
+    <div class="stat-card"><strong id="home-factor-values">-</strong><span>因子值记录</span></div>
+    <div class="stat-card"><strong id="home-model-count">-</strong><span>模型定义</span></div>
+</section>
+
+<section class="chart-grid">
+    <div class="chart-card">
+        <h2>模块能力分布</h2>
+        <div id="home-capability-chart" class="chart-panel"></div>
+    </div>
+    <div class="chart-card">
+        <h2>分析流程</h2>
+        <div id="home-flow-chart" class="chart-panel"></div>
+    </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function homeJson(url) {
+    const response = await fetch(url);
+    return await response.json();
+}
+
+async function loadHomeOverview() {
+    const [overview, factors, models] = await Promise.all([
+        homeJson('/api/quant/overview'),
+        homeJson('/api/quant/factors'),
+        homeJson('/api/quant/models')
+    ]);
+    document.getElementById('home-stock-count').textContent = overview.overview?.stock_basic_count ?? '-';
+    document.getElementById('home-factor-values').textContent = overview.overview?.factor_value_count ?? '-';
+    document.getElementById('home-factor-count').textContent = factors.factors?.length ?? '-';
+    document.getElementById('home-model-count').textContent = models.models?.length ?? '-';
+}
+
+function renderHomeCharts() {
+    const capability = echarts.init(document.getElementById('home-capability-chart'));
+    capability.setOption({
+        tooltip: { trigger: 'item' },
+        series: [{
+            type: 'pie',
+            radius: ['45%', '72%'],
+            data: [
+                { value: 22, name: '多因子' },
+                { value: 8, name: 'AI 工具' },
+                { value: 3, name: '预测模型' },
+                { value: 5, name: '数据流程' }
+            ]
+        }]
+    });
+    const flow = echarts.init(document.getElementById('home-flow-chart'));
+    flow.setOption({
+        tooltip: { trigger: 'axis' },
+        xAxis: { type: 'category', data: ['股票池', '日线数据', '因子计算', '评分排序', '模型预测'] },
+        yAxis: { type: 'value' },
+        series: [{ type: 'bar', data: [90, 82, 78, 70, 62], itemStyle: { color: '#1668f2' } }]
+    });
+}
+
+loadHomeOverview();
+renderHomeCharts();
+</script>
 {% endblock %}

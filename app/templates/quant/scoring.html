@@ -1,0 +1,166 @@
+{% extends "base.html" %}
+
+{% block title %}股票评分{% endblock %}
+
+{% block head %}
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+{% endblock %}
+
+{% block content %}
+<section class="page-title">
+    <div>
+        <h1>股票评分</h1>
+        <p>基于已选因子和权重计算综合评分，输出股票排名和图表。</p>
+    </div>
+</section>
+
+<section class="panel">
+    <div class="table-head" style="padding:0 0 14px;border-bottom:none">
+        <h2>评分配置</h2>
+        <button class="action-btn" onclick="scoreStocks()">计算评分</button>
+    </div>
+    <div class="form-grid">
+        <div class="form-row"><label>交易日期</label><input id="score-date" value="20241227"></div>
+        <div class="form-row"><label>评分方法</label><select id="score-method"><option>基于因子</option><option>等权评分</option><option>自定义权重</option></select></div>
+        <div class="form-row"><label>显示数量</label><select id="score-limit"><option value="20">前20名</option><option value="50" selected>前50名</option><option value="100">前100名</option></select></div>
+        <div class="form-row"><label>股票代码</label><input id="score-stock-code" placeholder="688001.SH"></div>
+    </div>
+</section>
+
+<section class="panel">
+    <div class="table-head" style="padding:0 0 12px;border-bottom:none">
+        <h2>因子选择</h2>
+        <div class="head-actions">
+            <button class="secondary-btn" onclick="selectAllFactors()">全选</button>
+            <button class="secondary-btn" onclick="clearFactors()">清空</button>
+            <a class="ghost-link" href="/quant/factors">管理因子</a>
+        </div>
+    </div>
+    <div id="score-factor-selector" class="selector-grid"></div>
+</section>
+
+<section class="chart-grid">
+    <div class="chart-card">
+        <h2>评分 Top 10</h2>
+        <div id="score-bar-chart" class="chart-panel"></div>
+    </div>
+    <div class="chart-card">
+        <h2>行业分布</h2>
+        <div id="score-industry-chart" class="chart-panel"></div>
+    </div>
+</section>
+
+<section class="table-card">
+    <div class="table-head">
+        <h2>评分结果</h2>
+        <span class="badge blue" id="score-count">0</span>
+    </div>
+    <div class="table-wrap">
+        <table>
+            <thead><tr><th>排名</th><th>股票代码</th><th>股票名称</th><th>评分</th><th>行业</th><th>地区</th><th>操作</th></tr></thead>
+            <tbody id="score-table-body"><tr><td colspan="7">请先计算评分</td></tr></tbody>
+        </table>
+    </div>
+</section>
+
+<section class="result-layout">
+    <div class="result-card">
+        <h2>个股因子快照</h2>
+        <pre id="stock-factor-box" class="result-box">选择股票后查看...</pre>
+    </div>
+    <div class="result-card">
+        <h2>执行反馈</h2>
+        <pre id="score-log" class="result-box">等待操作...</pre>
+    </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/quant-common.js"></script>
+<script>
+let factors = [];
+let selected = new Set();
+let scoreRows = [];
+const scoreChart = {};
+
+async function loadScoreFactors() {
+    const data = await qjson('/api/quant/factors');
+    factors = data.factors || [];
+    selected = new Set(factors.map(item => item.factor_id));
+    renderScoreFactors();
+}
+
+function renderScoreFactors() {
+    document.getElementById('score-factor-selector').innerHTML = factors.map(item => `
+        <button class="select-pill ${selected.has(item.factor_id) ? 'active' : ''}" onclick="toggleFactor('${item.factor_id}')">${item.factor_name || item.factor_id}</button>
+    `).join('') || '暂无因子，请先到因子管理初始化。';
+}
+
+function toggleFactor(id) {
+    selected.has(id) ? selected.delete(id) : selected.add(id);
+    renderScoreFactors();
+}
+function selectAllFactors() { selected = new Set(factors.map(item => item.factor_id)); renderScoreFactors(); }
+function clearFactors() { selected.clear(); renderScoreFactors(); }
+
+async function scoreStocks() {
+    const data = await qcall('/api/quant/scores', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ trade_date: val('score-date'), factor_ids: Array.from(selected) })
+    });
+    document.getElementById('score-log').textContent = JSON.stringify(data, null, 2);
+    scoreRows = (data.results || []).slice(0, Number(val('score-limit') || 50));
+    renderScoreRows();
+    renderScoreCharts();
+}
+
+function renderScoreRows() {
+    document.getElementById('score-count').textContent = scoreRows.length;
+    const tbody = document.getElementById('score-table-body');
+    if (!scoreRows.length) {
+        tbody.innerHTML = '<tr><td colspan="7">暂无评分结果。</td></tr>';
+        return;
+    }
+    tbody.innerHTML = scoreRows.map(item => `
+        <tr>
+            <td><span class="badge ${item.rank <= 10 ? 'green' : 'blue'}">${item.rank}</span></td>
+            <td class="code-text">${item.ts_code}</td>
+            <td>${item.name || '-'}</td>
+            <td>${scoreCell(item.composite_score)}</td>
+            <td>${item.industry || '-'}</td>
+            <td>${item.area || '-'}</td>
+            <td><button class="secondary-btn" onclick="showStockFactors('${item.ts_code}')">查看</button></td>
+        </tr>
+    `).join('');
+}
+
+function renderScoreCharts() {
+    const top = scoreRows.slice(0, 10);
+    scoreChart.bar = scoreChart.bar || echarts.init(document.getElementById('score-bar-chart'));
+    scoreChart.bar.setOption({
+        tooltip: { trigger: 'axis' },
+        xAxis: { type: 'category', data: top.map(item => item.name || item.ts_code), axisLabel: { rotate: 30 } },
+        yAxis: { type: 'value' },
+        series: [{ type: 'bar', data: top.map(item => Number(item.composite_score || 0).toFixed(4)), itemStyle: { color: '#1668f2' } }]
+    });
+    const counts = scoreRows.reduce((acc, item) => {
+        const key = item.industry || '未知';
+        acc[key] = (acc[key] || 0) + 1;
+        return acc;
+    }, {});
+    scoreChart.pie = scoreChart.pie || echarts.init(document.getElementById('score-industry-chart'));
+    scoreChart.pie.setOption({
+        tooltip: { trigger: 'item' },
+        series: [{ type: 'pie', radius: ['42%', '72%'], data: Object.entries(counts).map(([name, value]) => ({ name, value })) }]
+    });
+}
+
+async function showStockFactors(tsCode) {
+    const data = await qjson(`/api/quant/stocks/${tsCode}/factors?trade_date=${val('score-date')}`);
+    document.getElementById('stock-factor-box').textContent = JSON.stringify(data, null, 2);
+}
+
+loadScoreFactors();
+</script>
+{% endblock %}

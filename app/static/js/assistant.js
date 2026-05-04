@@ -243,6 +243,7 @@ class FinanceChatApp {
 
     markdownToHtml(text) {
         let html = this.escapeHtml(text || '');
+        html = this.renderAssistantJsonBlocks(html);
         html = html.replace(/^### (.*)$/gm, '<h3>$1</h3>');
         html = html.replace(/^## (.*)$/gm, '<h2>$1</h2>');
         html = html.replace(/^# (.*)$/gm, '<h1>$1</h1>');
@@ -251,6 +252,80 @@ class FinanceChatApp {
         html = html.replace(/\n\n+/g, '</p><p>');
         html = html.replace(/\n/g, '<br>');
         return `<p>${html}</p>`;
+    }
+
+    renderAssistantJsonBlocks(html) {
+        return html.replace(/```text<br>([\s\S]*?)<br>```/g, (match, body) => {
+            const decoded = this.decodeHtml(body.replace(/<br>/g, '\n')).trim();
+            const card = this.tryRenderJsonCard(decoded);
+            return card || `<pre class="assistant-data-card"><code>${this.escapeHtml(decoded)}</code></pre>`;
+        });
+    }
+
+    tryRenderJsonCard(text) {
+        let data;
+        try {
+            data = JSON.parse(text);
+        } catch {
+            return null;
+        }
+        if (Array.isArray(data)) {
+            return this.renderArrayCard('查询结果', data);
+        }
+        if (data && typeof data === 'object') {
+            if (data['汇总'] && data['近期交易数据']) {
+                return this.renderObjectCard('走势汇总', data['汇总']) + this.renderArrayCard('近期交易数据', data['近期交易数据']);
+            }
+            return this.renderObjectCard(data['股票名称'] || data['股票代码'] || '数据结果', data);
+        }
+        return null;
+    }
+
+    renderObjectCard(title, object) {
+        const entries = Object.entries(object || {}).filter(([, value]) => {
+            return value == null || typeof value !== 'object';
+        });
+        if (!entries.length) return '';
+        return `
+            <div class="assistant-data-card">
+                <div class="assistant-data-title">${this.escapeHtml(String(title))}</div>
+                <div class="assistant-data-grid">
+                    ${entries.map(([key, value]) => `
+                        <div class="assistant-data-item">
+                            <span>${this.escapeHtml(String(key))}</span>
+                            <strong>${this.escapeHtml(String(value ?? '-'))}</strong>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+        `;
+    }
+
+    renderArrayCard(title, rows) {
+        const safeRows = rows.slice(0, 8).filter((item) => item && typeof item === 'object');
+        if (!safeRows.length) return '';
+        const keys = Array.from(new Set(safeRows.flatMap((row) => Object.keys(row)))).slice(0, 6);
+        return `
+            <div class="assistant-data-card">
+                <div class="assistant-data-title">${this.escapeHtml(title)}</div>
+                <div class="table-wrap">
+                    <table>
+                        <thead><tr>${keys.map((key) => `<th>${this.escapeHtml(key)}</th>`).join('')}</tr></thead>
+                        <tbody>
+                            ${safeRows.map((row) => `
+                                <tr>${keys.map((key) => `<td>${this.escapeHtml(String(row[key] ?? '-'))}</td>`).join('')}</tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        `;
+    }
+
+    decodeHtml(html) {
+        const textarea = document.createElement('textarea');
+        textarea.innerHTML = html;
+        return textarea.value;
     }
 
     escapeHtml(text) {

@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
+from app.models.stock_basic import StockBasic
 from app.schemas.quant import (
     CustomFactorCreate,
     QuantModelCreate,
@@ -39,6 +40,48 @@ def overview(db: Session = Depends(get_db)):
         return scoring_service.get_quant_overview(db)
     except Exception as exc:
         return {"success": False, "message": str(exc)}
+
+
+@router.get("/stocks")
+def list_stocks(
+    industry: str | None = Query(None),
+    area: str | None = Query(None),
+    keyword: str | None = Query(None),
+    limit: int = Query(50, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    db: Session = Depends(get_db),
+):
+    query = db.query(StockBasic)
+    if industry:
+        query = query.filter(StockBasic.industry == industry)
+    if area:
+        query = query.filter(StockBasic.area == area)
+    if keyword:
+        like = f"%{keyword}%"
+        query = query.filter(
+            (StockBasic.ts_code.like(like))
+            | (StockBasic.symbol.like(like))
+            | (StockBasic.name.like(like))
+        )
+    total = query.count()
+    rows = query.order_by(StockBasic.ts_code).offset(offset).limit(limit).all()
+    return {
+        "success": True,
+        "total": total,
+        "stocks": [
+            {
+                "ts_code": item.ts_code,
+                "symbol": item.symbol,
+                "name": item.name,
+                "area": item.area,
+                "industry": item.industry,
+                "market": item.market,
+                "list_date": item.list_date.isoformat() if item.list_date else "",
+                "is_star_board": item.is_star_board,
+            }
+            for item in rows
+        ],
+    }
 
 
 @router.post("/sync/star-board/basic")

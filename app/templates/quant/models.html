@@ -1,0 +1,216 @@
+{% extends "base.html" %}
+
+{% block title %}模型管理{% endblock %}
+
+{% block head %}
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+{% endblock %}
+
+{% block content %}
+<section class="page-title">
+    <div>
+        <h1>模型管理</h1>
+        <p>创建、训练和预测多因子模型，模型类型和因子均通过按钮选择。</p>
+    </div>
+    <button class="action-btn" onclick="toggleCreatePanel()">创建新模型</button>
+</section>
+
+<section class="stat-grid">
+    <div class="stat-card"><strong id="model-total">0</strong><span>总模型数</span></div>
+    <div class="stat-card"><strong id="model-trained">0</strong><span>已训练</span></div>
+    <div class="stat-card"><strong id="model-rf">0</strong><span>随机森林</span></div>
+    <div class="stat-card"><strong id="model-other">0</strong><span>其他模型</span></div>
+</section>
+
+<section class="panel" id="create-model-panel" style="display:none">
+    <div class="form-grid">
+        <div class="form-row"><label>模型 ID</label><input id="model-id" value="star_rf_v1"></div>
+        <div class="form-row"><label>模型名称</label><input id="model-name" value="STAR Random Forest V1"></div>
+        <div class="form-row"><label>目标类型</label><select id="target-type"><option value="return_5d">return_5d</option><option value="return_20d">return_20d</option></select></div>
+        <div class="form-row"><label>预测日期</label><input id="predict-date" value="20241227"></div>
+    </div>
+    <h3>模型类型</h3>
+    <div class="selector-grid" id="model-type-selector">
+        <button class="select-pill active" data-type="random_forest" onclick="chooseModelType(this)">随机森林</button>
+        <button class="select-pill" data-type="xgboost" onclick="chooseModelType(this)">XGBoost</button>
+        <button class="select-pill" data-type="lightgbm" onclick="chooseModelType(this)">LightGBM</button>
+    </div>
+    <h3>建模因子</h3>
+    <div id="model-factor-selector" class="selector-grid"></div>
+    <div class="button-row" style="margin-top:16px">
+        <button class="action-btn" onclick="createModel()">保存模型定义</button>
+        <button class="success-btn" onclick="trainModel()">训练模型</button>
+        <button class="secondary-btn" onclick="predictModel()">生成预测</button>
+    </div>
+</section>
+
+<section class="chart-grid">
+    <div class="chart-card">
+        <h2>模型类型分布</h2>
+        <div id="model-type-chart" class="chart-panel"></div>
+    </div>
+    <div class="chart-card">
+        <h2>预测结果 Top 10</h2>
+        <div id="model-predict-chart" class="chart-panel"></div>
+    </div>
+</section>
+
+<section class="table-card">
+    <div class="table-head"><h2>模型列表</h2><button class="secondary-btn" onclick="loadModelsPage()">刷新</button></div>
+    <div class="table-wrap">
+        <table>
+            <thead><tr><th>模型 ID</th><th>模型名称</th><th>类型</th><th>目标</th><th>状态</th><th>操作</th></tr></thead>
+            <tbody id="model-table-body"></tbody>
+        </table>
+    </div>
+</section>
+
+<section class="table-card">
+    <div class="table-head"><h2>ML 预测结果</h2><span class="badge blue" id="ml-count">0</span></div>
+    <div class="table-wrap">
+        <table>
+            <thead><tr><th>排名</th><th>股票代码</th><th>预测值</th></tr></thead>
+            <tbody id="ml-table-body"><tr><td colspan="3">暂无结果</td></tr></tbody>
+        </table>
+    </div>
+</section>
+
+<section class="result-card">
+    <h2>执行反馈</h2>
+    <pre id="model-log" class="result-box">等待操作...</pre>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/quant-common.js"></script>
+<script>
+let modelType = 'random_forest';
+let models = [];
+let modelFactors = [];
+let selectedModelFactors = new Set();
+let mlRows = [];
+const modelCharts = {};
+
+function toggleCreatePanel() {
+    const panel = document.getElementById('create-model-panel');
+    panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+}
+
+function chooseModelType(button) {
+    document.querySelectorAll('#model-type-selector .select-pill').forEach(item => item.classList.remove('active'));
+    button.classList.add('active');
+    modelType = button.dataset.type;
+}
+
+async function loadModelFactors() {
+    const data = await qjson('/api/quant/factors');
+    modelFactors = data.factors || [];
+    selectedModelFactors = new Set(modelFactors.map(item => item.factor_id));
+    renderModelFactors();
+}
+
+function renderModelFactors() {
+    document.getElementById('model-factor-selector').innerHTML = modelFactors.map(item => `
+        <button class="select-pill ${selectedModelFactors.has(item.factor_id) ? 'active' : ''}" onclick="toggleModelFactor('${item.factor_id}')">${item.factor_name || item.factor_id}</button>
+    `).join('');
+}
+
+function toggleModelFactor(id) {
+    selectedModelFactors.has(id) ? selectedModelFactors.delete(id) : selectedModelFactors.add(id);
+    renderModelFactors();
+}
+
+async function createModel() {
+    const payload = {
+        model_id: val('model-id'),
+        model_name: val('model-name'),
+        model_type: modelType,
+        target_type: val('target-type'),
+        factor_list: Array.from(selectedModelFactors)
+    };
+    const data = await qcall('/api/quant/models', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+    document.getElementById('model-log').textContent = JSON.stringify(data, null, 2);
+    await loadModelsPage();
+}
+
+async function trainModel(id) {
+    const modelId = id || val('model-id');
+    const data = await qcall('/api/quant/models/train', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ model_id: modelId, start_date: '20240101', end_date: '20241227' })
+    });
+    document.getElementById('model-log').textContent = JSON.stringify(data, null, 2);
+    await loadModelsPage();
+}
+
+async function predictModel(id) {
+    const modelId = id || val('model-id');
+    const data = await qcall('/api/quant/models/predict', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ model_id: modelId, trade_date: val('predict-date') || '20241227' })
+    });
+    document.getElementById('model-log').textContent = JSON.stringify(data, null, 2);
+    mlRows = data.results || [];
+    renderMlRows();
+    renderMlChart();
+}
+
+async function loadModelsPage() {
+    const data = await qjson('/api/quant/models');
+    models = data.models || [];
+    document.getElementById('model-total').textContent = models.length;
+    document.getElementById('model-trained').textContent = models.filter(item => item.artifact_path).length;
+    document.getElementById('model-rf').textContent = models.filter(item => item.model_type === 'random_forest').length;
+    document.getElementById('model-other').textContent = models.filter(item => item.model_type !== 'random_forest').length;
+    document.getElementById('model-table-body').innerHTML = models.length ? models.map(item => `
+        <tr>
+            <td class="code-text">${item.model_id}</td>
+            <td>${item.model_name}</td>
+            <td><span class="badge cyan">${item.model_type}</span></td>
+            <td>${item.target_type}</td>
+            <td><span class="badge ${item.artifact_path ? 'green' : 'gray'}">${item.artifact_path ? '已训练' : '未训练'}</span></td>
+            <td>
+                <button class="success-btn" onclick="trainModel('${item.model_id}')">训练</button>
+                <button class="secondary-btn" onclick="predictModel('${item.model_id}')">预测</button>
+            </td>
+        </tr>
+    `).join('') : '<tr><td colspan="6">暂无模型定义。</td></tr>';
+    renderModelTypeChart();
+}
+
+function renderModelTypeChart() {
+    const counts = models.reduce((acc, item) => {
+        acc[item.model_type] = (acc[item.model_type] || 0) + 1;
+        return acc;
+    }, {});
+    modelCharts.type = modelCharts.type || echarts.init(document.getElementById('model-type-chart'));
+    modelCharts.type.setOption({
+        tooltip: { trigger: 'item' },
+        series: [{ type: 'pie', radius: ['45%', '72%'], data: Object.entries(counts).map(([name, value]) => ({ name, value })) }]
+    });
+}
+
+function renderMlRows() {
+    document.getElementById('ml-count').textContent = mlRows.length;
+    document.getElementById('ml-table-body').innerHTML = mlRows.length ? mlRows.slice(0, 50).map(item => `
+        <tr><td><span class="badge blue">${item.rank}</span></td><td class="code-text">${item.ts_code}</td><td>${fmtNumber(item.predicted_value, 6)}</td></tr>
+    `).join('') : '<tr><td colspan="3">暂无结果</td></tr>';
+}
+
+function renderMlChart() {
+    const top = mlRows.slice(0, 10);
+    modelCharts.predict = modelCharts.predict || echarts.init(document.getElementById('model-predict-chart'));
+    modelCharts.predict.setOption({
+        tooltip: { trigger: 'axis' },
+        xAxis: { type: 'category', data: top.map(item => item.ts_code), axisLabel: { rotate: 25 } },
+        yAxis: { type: 'value' },
+        series: [{ type: 'bar', data: top.map(item => item.predicted_value), itemStyle: { color: '#0f9f6e' } }]
+    });
+}
+
+loadModelFactors();
+loadModelsPage();
+</script>
+{% endblock %}

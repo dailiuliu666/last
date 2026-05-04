@@ -3,20 +3,40 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{% block title %}Graduation Finance Platform{% endblock %}</title>
+    <title>{% block title %}毕业设计金融平台{% endblock %}</title>
     <link rel="stylesheet" href="/static/css/app.css">
+    {% block head %}{% endblock %}
 </head>
 <body>
-    <header class="site-header">
+    <header class="topbar">
+        <a class="brand" href="/">
+            <span class="brand-icon">↗</span>
+            <span>股票分析系统</span>
+        </a>
         <nav class="nav">
             <a href="/">首页</a>
-            <a href="/quant">量化模块</a>
+            <a href="/stocks">股票列表</a>
+            <a href="/quant/factors">因子管理</a>
+            <a href="/quant/scoring">选股评分</a>
+            <div class="nav-menu">
+                <a href="/quant/models">多因子模型</a>
+                <div class="nav-dropdown">
+                    <a href="/quant/models">模型管理</a>
+                    <a href="/quant/scoring">股票评分</a>
+                    <a href="/quant/workbench">量化工作台</a>
+                </div>
+            </div>
             <a href="/predictor">股票预测</a>
             <a href="/assistant">AI 助手</a>
         </nav>
+        <div class="top-actions">
+            <span class="live-pill">实时数据</span>
+            <button class="refresh-btn" type="button" onclick="window.location.reload()">刷新</button>
+        </div>
     </header>
     <main class="page">
         {% block content %}{% endblock %}
     </main>
+    {% block scripts %}{% endblock %}
 </body>
 </html>

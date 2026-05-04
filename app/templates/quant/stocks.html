@@ -1,0 +1,114 @@
+{% extends "base.html" %}
+
+{% block title %}股票列表{% endblock %}
+
+{% block content %}
+<section class="page-title">
+    <div>
+        <h1>股票列表</h1>
+        <p>浏览股票池信息，支持按行业、地区和关键词筛选。</p>
+    </div>
+</section>
+
+<section class="panel">
+    <div class="form-grid">
+        <div class="form-row">
+            <label>行业</label>
+            <input id="stock-industry" placeholder="例如 半导体">
+        </div>
+        <div class="form-row">
+            <label>地区</label>
+            <input id="stock-area" placeholder="例如 上海">
+        </div>
+        <div class="form-row">
+            <label>搜索</label>
+            <input id="stock-keyword" placeholder="股票代码或名称">
+        </div>
+        <div class="form-row">
+            <label>显示数量</label>
+            <select id="stock-limit">
+                <option value="20">20</option>
+                <option value="50" selected>50</option>
+                <option value="100">100</option>
+            </select>
+        </div>
+    </div>
+    <div class="button-row" style="margin-top:16px">
+        <button class="action-btn" onclick="loadStocks()">筛选</button>
+        <button class="secondary-btn" onclick="resetStocks()">重置</button>
+    </div>
+</section>
+
+<section class="table-card">
+    <div class="table-head">
+        <h2>股票列表</h2>
+        <span class="badge blue" id="stock-total">0</span>
+    </div>
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>股票代码</th>
+                    <th>股票名称</th>
+                    <th>行业</th>
+                    <th>地区</th>
+                    <th>市场</th>
+                    <th>上市日期</th>
+                    <th>操作</th>
+                </tr>
+            </thead>
+            <tbody id="stock-table-body">
+                <tr><td colspan="7">加载中...</td></tr>
+            </tbody>
+        </table>
+    </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function loadStocks() {
+    const params = new URLSearchParams();
+    const industry = document.getElementById('stock-industry').value.trim();
+    const area = document.getElementById('stock-area').value.trim();
+    const keyword = document.getElementById('stock-keyword').value.trim();
+    const limit = document.getElementById('stock-limit').value;
+    if (industry) params.set('industry', industry);
+    if (area) params.set('area', area);
+    if (keyword) params.set('keyword', keyword);
+    params.set('limit', limit);
+    const response = await fetch(`/api/quant/stocks?${params.toString()}`);
+    const data = await response.json();
+    document.getElementById('stock-total').textContent = data.total ?? 0;
+    renderStocks(data.stocks || []);
+}
+
+function resetStocks() {
+    document.getElementById('stock-industry').value = '';
+    document.getElementById('stock-area').value = '';
+    document.getElementById('stock-keyword').value = '';
+    loadStocks();
+}
+
+function renderStocks(rows) {
+    const tbody = document.getElementById('stock-table-body');
+    if (!rows.length) {
+        tbody.innerHTML = '<tr><td colspan="7">暂无股票数据，请先同步股票池。</td></tr>';
+        return;
+    }
+    tbody.innerHTML = rows.map(item => `
+        <tr>
+            <td class="code-text">${item.ts_code}</td>
+            <td><strong>${item.name || ''}</strong></td>
+            <td><span class="badge gray">${item.industry || '-'}</span></td>
+            <td>${item.area || '-'}</td>
+            <td>${item.market || '-'}</td>
+            <td>${item.list_date || '-'}</td>
+            <td><a class="secondary-btn" href="/quant/scoring">评分</a></td>
+        </tr>
+    `).join('');
+}
+
+loadStocks();
+</script>
+{% endblock %}

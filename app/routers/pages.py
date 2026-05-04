@@ -22,6 +22,31 @@ def index(request: Request):
 
 @router.get("/quant", response_class=HTMLResponse)
 def quant_dashboard(request: Request):
+    return render_template(request, "quant/index.html")
+
+
+@router.get("/stocks", response_class=HTMLResponse)
+def stocks_index(request: Request):
+    return render_template(request, "quant/stocks.html")
+
+
+@router.get("/quant/factors", response_class=HTMLResponse)
+def quant_factors(request: Request):
+    return render_template(request, "quant/factors.html")
+
+
+@router.get("/quant/scoring", response_class=HTMLResponse)
+def quant_scoring(request: Request):
+    return render_template(request, "quant/scoring.html")
+
+
+@router.get("/quant/models", response_class=HTMLResponse)
+def quant_models(request: Request):
+    return render_template(request, "quant/models.html")
+
+
+@router.get("/quant/workbench", response_class=HTMLResponse)
+def quant_workbench(request: Request):
     return render_template(request, "quant/dashboard.html")
 
 

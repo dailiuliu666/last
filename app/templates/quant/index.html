@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+
+{% block title %}量化分析{% endblock %}
+
+{% block head %}
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+{% endblock %}
+
+{% block content %}
+<section class="page-title">
+    <div>
+        <h1>量化分析</h1>
+        <p>把股票池、因子、评分、模型拆成独立功能页，按流程完成分析。</p>
+    </div>
+    <div class="head-actions">
+        <a class="success-btn" href="/quant/factors">计算因子</a>
+        <a class="action-btn" href="/quant/scoring">开始评分</a>
+    </div>
+</section>
+
+<section class="stat-grid">
+    <div class="stat-card"><strong id="quant-stock-count">-</strong><span>股票池数量</span></div>
+    <div class="stat-card"><strong id="quant-factor-values">-</strong><span>因子值记录</span></div>
+    <div class="stat-card"><strong id="quant-latest-date">-</strong><span>最新因子日期</span></div>
+    <div class="stat-card"><strong id="quant-model-count">-</strong><span>模型数量</span></div>
+</section>
+
+<section class="feature-grid">
+    <a class="feature-card" href="/stocks">
+        <div class="feature-icon">☷</div>
+        <h3>股票列表</h3>
+        <p>查看股票池、行业、地区和上市日期。</p>
+        <span class="action-btn">进入</span>
+    </a>
+    <a class="feature-card" href="/quant/factors">
+        <div class="feature-icon">⚙</div>
+        <h3>因子管理</h3>
+        <p>初始化、筛选、选择和创建自定义因子。</p>
+        <span class="success-btn">进入</span>
+    </a>
+    <a class="feature-card" href="/quant/scoring">
+        <div class="feature-icon">★</div>
+        <h3>股票评分</h3>
+        <p>选择因子并生成综合评分排名。</p>
+        <span class="action-btn">进入</span>
+    </a>
+    <a class="feature-card" href="/quant/models">
+        <div class="feature-icon">🧠</div>
+        <h3>模型管理</h3>
+        <p>创建、训练和预测多因子模型。</p>
+        <span class="secondary-btn">进入</span>
+    </a>
+</section>
+
+<section class="chart-grid">
+    <div class="chart-card">
+        <h2>量化流程进度</h2>
+        <div id="quant-flow-chart" class="chart-panel"></div>
+    </div>
+    <div class="chart-card">
+        <h2>因子类型概览</h2>
+        <div id="quant-factor-chart" class="chart-panel"></div>
+    </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function qjson(url) {
+    const response = await fetch(url);
+    return await response.json();
+}
+async function loadQuantIndex() {
+    const [overview, factors, models] = await Promise.all([
+        qjson('/api/quant/overview'),
+        qjson('/api/quant/factors'),
+        qjson('/api/quant/models')
+    ]);
+    document.getElementById('quant-stock-count').textContent = overview.overview?.stock_basic_count ?? '-';
+    document.getElementById('quant-factor-values').textContent = overview.overview?.factor_value_count ?? '-';
+    document.getElementById('quant-latest-date').textContent = overview.overview?.latest_factor_trade_date ?? '-';
+    document.getElementById('quant-model-count').textContent = models.models?.length ?? '-';
+    const factorsRows = factors.factors || [];
+    const counts = factorsRows.reduce((acc, item) => {
+        acc[item.factor_type] = (acc[item.factor_type] || 0) + 1;
+        return acc;
+    }, {});
+    echarts.init(document.getElementById('quant-factor-chart')).setOption({
+        tooltip: { trigger: 'item' },
+        series: [{ type: 'pie', radius: '70%', data: Object.entries(counts).map(([name, value]) => ({ name, value })) }]
+    });
+}
+echarts.init(document.getElementById('quant-flow-chart')).setOption({
+    xAxis: { type: 'category', data: ['同步', '因子', '评分', '训练', '预测'] },
+    yAxis: { type: 'value', max: 100 },
+    series: [{ type: 'line', smooth: true, areaStyle: {}, data: [95, 88, 80, 72, 68], itemStyle: { color: '#0f9f6e' } }]
+});
+loadQuantIndex();
+</script>
+{% endblock %}
