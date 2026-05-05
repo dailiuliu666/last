@@ -35,7 +35,9 @@
                 <option value="LSTM">LSTM</option>
                 <option value="CNN">CNN</option>
                 <option value="CNN-LSTM">CNN-LSTM</option>
+                <option value="ARIMA-LSTM">ARIMA-LSTM</option>
             </select>
+            <div class="mini-note">ARIMA-LSTM 会先拟合趋势，再用 LSTM 学习残差，训练耗时会略长。</div>
         </div>
         <div class="form-row">
             <label>目标列</label>
@@ -142,16 +144,20 @@
                 <strong id="metric-mae">-</strong>
             </div>
             <div class="metric-pill">
+                <span>MSE</span>
+                <strong id="metric-mse">-</strong>
+            </div>
+            <div class="metric-pill">
                 <span>RMSE</span>
                 <strong id="metric-rmse">-</strong>
             </div>
             <div class="metric-pill">
-                <span>R²</span>
-                <strong id="metric-r2">-</strong>
+                <span>MAPE</span>
+                <strong id="metric-mape">-</strong>
             </div>
             <div class="metric-pill">
-                <span>方向准确率</span>
-                <strong id="metric-dir-acc">-</strong>
+                <span>R²</span>
+                <strong id="metric-r2">-</strong>
             </div>
         </div>
     </div>
@@ -162,8 +168,36 @@
     </div>
 
     <div class="result-card">
+        <h2>论文指标表</h2>
+        <div class="table-wrap">
+            <table id="metrics-table">
+                <thead>
+                    <tr>
+                        <th>指标</th>
+                        <th>含义</th>
+                        <th>数值</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td colspan="3">训练后生成指标表</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="result-card">
         <h2>单点预测</h2>
         <pre id="predictor-single-box" class="result-box">等待预测...</pre>
+    </div>
+</section>
+
+<section class="result-layout">
+    <div class="result-card wide">
+        <h2>特征相关性热力图</h2>
+        <div class="mini-note">点击“获取数据预览”后生成，可直接用图表右上角按钮保存高清图片。</div>
+        <div id="correlation-heatmap" class="chart-panel"></div>
     </div>
 </section>
 
@@ -178,6 +212,13 @@
     <div class="result-card wide">
         <h2>测试集真实值与预测值对比</h2>
         <div id="test-compare-chart" class="chart-panel"></div>
+    </div>
+</section>
+
+<section class="result-layout">
+    <div class="result-card wide">
+        <h2>误差趋势曲线</h2>
+        <div id="error-trend-chart" class="chart-panel"></div>
     </div>
 </section>
 
@@ -206,6 +247,8 @@ let savedModels = [];
 let trainHistoryChart = null;
 let testCompareChart = null;
 let futureChart = null;
+let correlationChart = null;
+let errorTrendChart = null;
 
 function predictorLog(data) {
     document.getElementById('predictor-log').textContent = JSON.stringify(data, null, 2);
@@ -247,6 +290,7 @@ async function fetchPredictorData() {
     });
     predictorLog(data);
     renderPredictorData(data.preview || []);
+    renderCorrelationHeatmap(data.correlation || {});
 }
 
 async function trainPredictorModel() {
@@ -259,8 +303,10 @@ async function trainPredictorModel() {
     predictorLog(data);
     document.getElementById('predictor-train-box').textContent = JSON.stringify(data.metrics || data, null, 2);
     renderTrainMetrics(data.metrics || {});
+    renderMetricsTable(data.metrics?.metrics_table || []);
     renderTrainHistory(data.history || {});
     renderTestCompare(data.test_dates || [], data.metrics?.actuals || [], data.metrics?.predictions || []);
+    renderErrorTrend(data.test_dates || [], data.metrics?.errors || [], data.metrics?.absolute_errors || []);
     await loadSavedModels();
 }
 
@@ -310,7 +356,7 @@ async function loadSavedModels() {
         ? savedModels.map(item => `<option value="${item.path}">${item.name}</option>`).join('')
         : '<option value="">暂无模型</option>';
     document.getElementById('saved-model-list').textContent = savedModels.length
-        ? savedModels.map(item => item.path).join('\n')
+        ? savedModels.map(item => `${item.name} | ${item.model_type || 'Keras'} | ${item.path}`).join('\n')
         : '尚未加载模型文件';
 }
 
@@ -361,12 +407,27 @@ function renderFutureTable(rows) {
 }
 
 function renderTrainMetrics(metrics) {
-    document.getElementById('metric-mae').textContent = metrics.mae != null ? metrics.mae.toFixed(4) : '-';
-    document.getElementById('metric-rmse').textContent = metrics.rmse != null ? metrics.rmse.toFixed(4) : '-';
-    document.getElementById('metric-r2').textContent = metrics.r2 != null ? metrics.r2.toFixed(4) : '-';
-    document.getElementById('metric-dir-acc').textContent = metrics.directional_accuracy != null
-        ? `${(metrics.directional_accuracy * 100).toFixed(2)}%`
-        : '-';
+    const formatted = metrics.metrics_formatted || {};
+    document.getElementById('metric-mae').textContent = formatted.mae || (metrics.mae != null ? metrics.mae.toFixed(4) : '-');
+    document.getElementById('metric-mse').textContent = formatted.mse || (metrics.mse != null ? metrics.mse.toFixed(4) : '-');
+    document.getElementById('metric-rmse').textContent = formatted.rmse || (metrics.rmse != null ? metrics.rmse.toFixed(4) : '-');
+    document.getElementById('metric-mape').textContent = formatted.mape || (metrics.mape != null ? `${metrics.mape.toFixed(2)}%` : '-');
+    document.getElementById('metric-r2').textContent = formatted.r2 || (metrics.r2 != null ? metrics.r2.toFixed(4) : '-');
+}
+
+function renderMetricsTable(rows) {
+    const tbody = document.querySelector('#metrics-table tbody');
+    if (!rows.length) {
+        tbody.innerHTML = '<tr><td colspan="3">训练后生成指标表</td></tr>';
+        return;
+    }
+    tbody.innerHTML = rows.map(item => `
+        <tr>
+            <td>${item.metric}</td>
+            <td>${item.name}</td>
+            <td>${item.value}</td>
+        </tr>
+    `).join('');
 }
 
 function renderTrainHistory(history) {
@@ -375,37 +436,84 @@ function renderTrainHistory(history) {
     const loss = history.loss || [];
     const valLoss = history.val_loss || [];
     const epochs = loss.map((_, index) => index + 1);
-    trainHistoryChart.setOption({
+    trainHistoryChart.setOption(paperChartOption({
         tooltip: { trigger: 'axis' },
         legend: { data: ['训练集 Loss', '验证集 Loss'] },
         xAxis: { type: 'category', data: epochs, name: 'Epoch' },
         yAxis: { type: 'value', name: 'Loss' },
         series: [
-            { name: '训练集 Loss', type: 'line', smooth: true, data: loss },
-            { name: '验证集 Loss', type: 'line', smooth: true, data: valLoss }
+            { name: '训练集 Loss', type: 'line', smooth: true, symbol: 'none', lineStyle: { width: 2 }, data: loss },
+            { name: '验证集 Loss', type: 'line', smooth: true, symbol: 'none', lineStyle: { width: 2 }, data: valLoss }
         ]
-    });
+    }));
 }
 
 function renderTestCompare(dates, actuals, predictions) {
     const container = document.getElementById('test-compare-chart');
     testCompareChart = testCompareChart || echarts.init(container);
-    testCompareChart.setOption({
+    testCompareChart.setOption(paperChartOption({
         tooltip: { trigger: 'axis' },
         legend: { data: ['真实值', '预测值'] },
         xAxis: { type: 'category', data: dates, name: '日期' },
         yAxis: { type: 'value', name: '价格' },
         series: [
-            { name: '真实值', type: 'line', smooth: true, data: actuals },
-            { name: '预测值', type: 'line', smooth: true, data: predictions }
+            { name: '真实值', type: 'line', smooth: true, symbol: 'none', lineStyle: { width: 2 }, data: actuals },
+            { name: '预测值', type: 'line', smooth: true, symbol: 'none', lineStyle: { width: 2 }, data: predictions }
         ]
-    });
+    }));
+}
+
+function renderErrorTrend(dates, errors, absoluteErrors) {
+    const container = document.getElementById('error-trend-chart');
+    errorTrendChart = errorTrendChart || echarts.init(container);
+    errorTrendChart.setOption(paperChartOption({
+        tooltip: { trigger: 'axis' },
+        legend: { data: ['预测误差', '绝对误差'] },
+        xAxis: { type: 'category', data: dates, name: '日期' },
+        yAxis: { type: 'value', name: '误差' },
+        series: [
+            { name: '预测误差', type: 'line', smooth: true, symbol: 'none', lineStyle: { width: 2 }, data: errors },
+            { name: '绝对误差', type: 'line', smooth: true, symbol: 'none', lineStyle: { width: 2 }, data: absoluteErrors }
+        ]
+    }));
+}
+
+function renderCorrelationHeatmap(correlation) {
+    const columns = correlation.columns || [];
+    const values = correlation.values || [];
+    const container = document.getElementById('correlation-heatmap');
+    correlationChart = correlationChart || echarts.init(container);
+    correlationChart.setOption(paperChartOption({
+        tooltip: {
+            position: 'top',
+            formatter: (params) => `${columns[params.value[1]]} / ${columns[params.value[0]]}: ${Number(params.value[2]).toFixed(4)}`
+        },
+        grid: { left: 90, right: 30, top: 30, bottom: 80 },
+        xAxis: { type: 'category', data: columns, splitArea: { show: true }, axisLabel: { rotate: 35 } },
+        yAxis: { type: 'category', data: columns, splitArea: { show: true } },
+        visualMap: {
+            min: -1,
+            max: 1,
+            calculable: true,
+            orient: 'horizontal',
+            left: 'center',
+            bottom: 10,
+            inRange: { color: ['#2b6cb0', '#ffffff', '#c53030'] }
+        },
+        series: [{
+            name: '特征相关性',
+            type: 'heatmap',
+            data: values,
+            label: { show: columns.length <= 8, formatter: (params) => Number(params.value[2]).toFixed(2) },
+            emphasis: { itemStyle: { shadowBlur: 4, shadowColor: 'rgba(0,0,0,.2)' } }
+        }]
+    }));
 }
 
 function renderFutureChart(rows) {
     const container = document.getElementById('future-chart');
     futureChart = futureChart || echarts.init(container);
-    futureChart.setOption({
+    futureChart.setOption(paperChartOption({
         tooltip: { trigger: 'axis' },
         xAxis: { type: 'category', data: rows.map(item => item.date), name: '日期' },
         yAxis: { type: 'value', name: '预测价格' },
@@ -414,10 +522,30 @@ function renderFutureChart(rows) {
                 type: 'line',
                 smooth: true,
                 symbol: 'circle',
+                lineStyle: { width: 2 },
                 data: rows.map(item => item.predicted_price)
             }
         ]
-    });
+    }));
+}
+
+function paperChartOption(option) {
+    return {
+        backgroundColor: '#fff',
+        color: ['#1668f2', '#ef334d', '#0f9f6e', '#f6b300'],
+        toolbox: {
+            right: 8,
+            feature: {
+                saveAsImage: {
+                    title: '保存高清图',
+                    pixelRatio: 3,
+                    backgroundColor: '#fff'
+                }
+            }
+        },
+        textStyle: { color: '#1f2937' },
+        ...option
+    };
 }
 
 loadSavedModels();

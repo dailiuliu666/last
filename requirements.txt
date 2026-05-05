@@ -19,3 +19,4 @@ requests
 langchain
 langchain-openai
 sse-starlette
+statsmodels
